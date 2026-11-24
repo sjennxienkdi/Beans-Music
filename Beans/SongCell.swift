@@ -25,6 +25,8 @@ struct SongCell: View {
     var fixedRowHeight: CGFloat?
     var playbackContext: [Song] = []
     var playbackIndex: Int?
+    /// 页面自定义的额外长按菜单项（例如已下载页的“分享文件”“删除下载”）。
+    var extraMenuItems: AnyView? = nil
     var onTap: (() -> Void)?
 
     @State private var showAddToPlaylist = false
@@ -156,6 +158,9 @@ struct SongCell: View {
                 }
                 .disabled(downloadProgress != nil)
             }
+            if let extraMenuItems {
+                extraMenuItems
+            }
             if !isCurrent {
                 Button {
                     if let playbackIndex, !playbackContext.isEmpty {
@@ -189,13 +194,24 @@ struct SongCell: View {
         }
         BeansHaptics.medium()
         ToastCenter.shared.show("开始下载：\(song.name)（\(quality.displayName)）")
-        let result = await DownloadManager.shared.download(song: song, quality: quality)
+        // 存进固定的下载目录并登记到「已下载」，之后可以直接在 app 里离线播放。
+        let result = await DownloadManager.shared.download(
+            song: song,
+            quality: quality,
+            destinationDirectory: DownloadLibrary.directory
+        )
         switch result {
         case .success(let downloaded):
+            DownloadLibrary.shared.record(
+                song: song,
+                fileURL: downloaded.url,
+                quality: downloaded.actualQuality.rawValue
+            )
             if downloaded.downgraded {
-                ToastCenter.shared.show("目标音质不可用，已降级为 \(downloaded.actualQuality.displayName)", duration: 3)
+                ToastCenter.shared.show("目标音质不可用，已降级为 \(downloaded.actualQuality.displayName)，已保存到「已下载」", duration: 3)
+            } else {
+                ToastCenter.shared.show("已下载《\(song.name)》，可在「音乐库 › 已下载」播放", duration: 2.6)
             }
-            shareFile = ShareFileItem(url: downloaded.url)
         case .failure(let error):
             ToastCenter.shared.show("下载失败：\(error.localizedDescription)", duration: 3)
         }

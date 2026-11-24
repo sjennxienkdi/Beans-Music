@@ -94,6 +94,8 @@ struct BeansApp: App {
             .task {
                 // 直接进入主页，首帧完成后恢复已安装用户的数据与媒体偏好。
                 await Task.yield()
+                // 已下载索引里文件已经不在的记录清掉（例如用户在“文件”app 里手动删除）。
+                DownloadLibrary.shared.pruneMissing()
                 player.restorePersistedPlayMode()
                 player.resumePersistedPlaybackIfEnabled()
                 FontManager.reinstallIfNeeded()

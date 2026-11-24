@@ -103,10 +103,11 @@ struct SongSelectionToggle: View {
     }
 }
 
-/// 多选时的操作条：全选、加入歌单、下一首播放、取消。
+/// 多选时的操作条：全选、加入歌单、下一首播放、取消；页面需要时再加删除。
 struct SongSelectionBar: View {
     @ObservedObject var selection: SongSelectionState
     let songs: [Song]
+    var onDelete: (([Song]) -> Void)? = nil
     var onPlayNext: ([Song]) -> Void
 
     private var allSelected: Bool {
@@ -114,31 +115,45 @@ struct SongSelectionBar: View {
         return !keys.isEmpty && keys.isSubset(of: selection.selectedKeys)
     }
 
+    private var hasSelection: Bool {
+        selection.count > 0
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Button {
-                BeansHaptics.select()
-                if allSelected { selection.clear() } else { selection.selectAll(songs) }
-            } label: {
-                Text(allSelected ? "取消全选" : "全选")
-                    .font(BeansFont.appFont(14, .medium))
-                    .foregroundStyle(Color.beansAmber)
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    BeansHaptics.select()
+                    if allSelected { selection.clear() } else { selection.selectAll(songs) }
+                } label: {
+                    Text(allSelected ? "取消全选" : "全选")
+                        .font(BeansFont.appFont(14, .medium))
+                        .foregroundStyle(Color.beansAmber)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 8)
+                Text("已选 \(selection.count) 首")
+                    .font(BeansFont.appFont(12))
+                    .foregroundStyle(Color.beansComment)
+                    .monospacedDigit()
+                actionButton("取消", systemImage: "xmark", enabled: true) {
+                    selection.end()
+                }
             }
-            .buttonStyle(.plain)
-            Spacer(minLength: 8)
-            Text("已选 \(selection.count) 首")
-                .font(BeansFont.appFont(12))
-                .foregroundStyle(Color.beansComment)
-                .monospacedDigit()
-            actionButton("加入歌单", systemImage: "text.badge.plus", enabled: selection.count > 0) {
-                selection.addRequest = SongSelectionAddRequest(songs: selection.selectedSongs(in: songs))
+            HStack(spacing: 10) {
+                actionButton("加入歌单", systemImage: "text.badge.plus", enabled: hasSelection) {
+                    selection.addRequest = SongSelectionAddRequest(songs: selection.selectedSongs(in: songs))
+                }
+                actionButton("下一首播放", systemImage: "text.line.first.and.arrowtriangle.forward", enabled: hasSelection) {
+                    onPlayNext(selection.selectedSongs(in: songs))
+                }
+                if let onDelete {
+                    actionButton("删除", systemImage: "trash", enabled: hasSelection, destructive: true) {
+                        onDelete(selection.selectedSongs(in: songs))
+                    }
+                }
             }
-            actionButton("下一首播放", systemImage: "text.line.first.and.arrowtriangle.forward", enabled: selection.count > 0) {
-                onPlayNext(selection.selectedSongs(in: songs))
-            }
-            actionButton("取消", systemImage: "xmark", enabled: true) {
-                selection.end()
-            }
+            .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -150,12 +165,13 @@ struct SongSelectionBar: View {
         _ title: String,
         systemImage: String,
         enabled: Bool,
+        destructive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(BeansFont.appFont(13, .semibold))
-                .foregroundStyle(Color.beansAmber)
+                .foregroundStyle(destructive ? Color.red : Color.beansAmber)
                 .opacity(enabled ? 1 : 0.4)
         }
         .buttonStyle(.plain)
@@ -167,13 +183,19 @@ struct SongSelectionBar: View {
 private struct SongSelectionBarHost: View {
     @ObservedObject var selection: SongSelectionState
     let songs: [Song]
+    let onDelete: (([Song]) -> Void)?
     let onPlayNext: ([Song]) -> Void
 
     var body: some View {
         if selection.isActive {
-            SongSelectionBar(selection: selection, songs: songs, onPlayNext: onPlayNext)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            SongSelectionBar(
+                selection: selection,
+                songs: songs,
+                onDelete: onDelete,
+                onPlayNext: onPlayNext
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
     }
 }
@@ -197,10 +219,16 @@ extension View {
     func beansSongSelectionBar(
         _ selection: SongSelectionState,
         songs: [Song],
+        onDelete: (([Song]) -> Void)? = nil,
         onPlayNext: @escaping ([Song]) -> Void
     ) -> some View {
         safeAreaInset(edge: .top, spacing: 0) {
-            SongSelectionBarHost(selection: selection, songs: songs, onPlayNext: onPlayNext)
+            SongSelectionBarHost(
+                selection: selection,
+                songs: songs,
+                onDelete: onDelete,
+                onPlayNext: onPlayNext
+            )
         }
         .background {
             SongSelectionAddSheetHost(selection: selection)

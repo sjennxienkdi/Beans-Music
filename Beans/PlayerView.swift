@@ -5095,20 +5095,28 @@ struct PlayerView: View {
         UserDefaults.standard.set(quality.rawValue, forKey: ThirdPartyAudioQuality.downloadStorageKey)
         BeansHaptics.medium()
         ToastCenter.shared.show("开始下载：\(song.name)（\(quality.displayName)）")
-        let result = await DownloadManager.shared.download(song: song, quality: quality)
+        // 存进固定的下载目录并登记到「已下载」，之后可以直接在 app 里离线播放。
+        let result = await DownloadManager.shared.download(
+            song: song,
+            quality: quality,
+            destinationDirectory: DownloadLibrary.directory
+        )
         switch result {
         case .success(let downloadResult):
+            DownloadLibrary.shared.record(
+                song: song,
+                fileURL: downloadResult.url,
+                quality: downloadResult.actualQuality.rawValue
+            )
             if downloadResult.downgraded {
-                ToastCenter.shared.show("目标音质不可用，已降级为 \(downloadResult.actualQuality.displayName)", duration: 3)
+                ToastCenter.shared.show("目标音质不可用，已降级为 \(downloadResult.actualQuality.displayName)，已保存到「已下载」", duration: 3)
             } else {
-                ToastCenter.shared.show("下载完成：\(downloadResult.actualQuality.displayName)", duration: 2)
+                ToastCenter.shared.show("已下载（\(downloadResult.actualQuality.displayName)），可在「音乐库 › 已下载」播放", duration: 2.6)
             }
             BeansLogger.shared.log(
-                "下载完成，弹出分享：\(song.name)（请求=\(downloadResult.requestedQuality.rawValue) 实际=\(downloadResult.actualQuality.rawValue)\(downloadResult.downgraded ? "，已自动降级" : "")）",
+                "下载完成并保存到已下载：\(song.name)（请求=\(downloadResult.requestedQuality.rawValue) 实际=\(downloadResult.actualQuality.rawValue)\(downloadResult.downgraded ? "，已自动降级" : "")）",
                 level: .info
             )
-            sharedFileURL = downloadResult.url
-            shareFile = ShareFileItem(url: downloadResult.url)
         case .failure(let error):
             BeansLogger.shared.log("下载失败：\(song.name) - \(error.localizedDescription)", level: .error)
             ToastCenter.shared.show("下载失败：\(error.localizedDescription)", duration: 3)

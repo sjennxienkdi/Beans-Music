@@ -38,6 +38,8 @@ final class FavoritesStore: ObservableObject {
         kugouFavoriteSongs = Self.loadSongs(kugouKey)
         kugouOfficialFavoriteSongs = Self.loadSongs(kugouOfficialKey)
         likedSongs = Self.loadSongs(likedKey)
+        // 初始化期间 didSet 不保证触发，这里显式建好索引。
+        likedKeys = Set(likedSongs.map(\.identityKey))
         migrateLegacyFavoritesIfNeeded()
     }
 

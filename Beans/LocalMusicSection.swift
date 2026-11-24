@@ -29,6 +29,8 @@ struct LocalMusicSection: View {
     @State private var showSyncPicker = false
     @State private var selectedSyncTargets: Set<SyncTarget> = []
     @State private var showLiked = false
+    @State private var showDownloads = false
+    @ObservedObject private var downloads = DownloadLibrary.shared
 
     private var emptyLocalPlaylistText: String {
         if languageRaw == AppLanguage.english.rawValue {
@@ -94,7 +96,7 @@ struct LocalMusicSection: View {
                     .font(BeansFont.appFont(12, .medium))
                     .foregroundStyle(Color.beansSage)
             }
-            // 固定入口：我喜欢。它不是本地歌单，所以始终显示在最上面。
+            // 固定入口：我喜欢、已下载。它们不是本地歌单，所以始终显示在最上面。
             VStack(spacing: 0) {
                 pinnedEntry(
                     title: "我喜欢的音乐",
@@ -104,6 +106,16 @@ struct LocalMusicSection: View {
                 ) {
                     BeansHaptics.tap()
                     showLiked = true
+                }
+                Divider().overlay(Color.beansComment.opacity(0.12))
+                pinnedEntry(
+                    title: "已下载",
+                    subtitle: downloadsSubtitle,
+                    icon: "arrow.down.circle.fill",
+                    colors: [Color.blue.opacity(0.80), Color.cyan.opacity(0.45)]
+                ) {
+                    BeansHaptics.tap()
+                    showDownloads = true
                 }
             }
             .padding(.vertical, 6)
@@ -234,6 +246,19 @@ struct LocalMusicSection: View {
                 .environmentObject(auth)
                 .environmentObject(theme)
         }
+        .sheet(isPresented: $showDownloads) {
+            DownloadedSongsView()
+                .environmentObject(player)
+                .environmentObject(auth)
+                .environmentObject(theme)
+        }
+    }
+
+    private var downloadsSubtitle: String {
+        let count = beansLocalSongCountText(downloads.items.count)
+        guard downloads.totalBytes > 0 else { return count }
+        let size = ByteCountFormatter.string(fromByteCount: downloads.totalBytes, countStyle: .file)
+        return "\(count) · \(size)"
     }
 
     /// 固定入口行（我喜欢）：样式与本地歌单行一致。

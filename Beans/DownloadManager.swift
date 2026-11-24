@@ -596,6 +596,12 @@ final class BatchDownloadManager: ObservableObject {
                 case .success(let downloaded):
                     self.succeededCount += 1
                     self.downloadedFiles.append(downloaded.url)
+                    // 登记到「已下载」，之后可以在 app 里直接播放本地文件。
+                    DownloadLibrary.shared.record(
+                        song: song,
+                        fileURL: downloaded.url,
+                        quality: downloaded.actualQuality.rawValue
+                    )
                 case .failure:
                     self.failedSongs.append(song.name)
                 }

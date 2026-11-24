@@ -888,6 +888,11 @@ final class PlayerManager: NSObject, ObservableObject {
         loadFailed = false
         pushHistory(song)
         savePersistedPlaybackState()
+        // 已下载的歌曲直接播本地文件：不用解析播放地址，离线也能播。
+        if let localURL = DownloadLibrary.shared.existingFileURL(for: song) {
+            setupPlayer(url: localURL, resumeAt: initialProgress, autoplay: autoplay)
+            return
+        }
         if song.source == .webdav {
             webDAVLoadTask = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1395,6 +1400,13 @@ final class PlayerManager: NSObject, ObservableObject {
         return true
     }
 
+    /// 已下载的本地文件播不了（损坏或被替换）时，删掉下载记录并改走网络重新加载。
+    private func retryWithoutDownloadedFile(song: Song) -> Bool {
+        DownloadLibrary.shared.removeDownloads(for: [song])
+        loadCurrent(autoplay: true)
+        return true
+    }
+
     private func setupPlayer(
         url: URL,
         thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil,
@@ -1431,7 +1443,10 @@ final class PlayerManager: NSObject, ObservableObject {
         // playing，随后以 AVFoundation -11849 失败。
         let item: AVPlayerItem
         var playbackHeaders: [String: String] = [:]
-        if isQQAudioHost(url.host) {
+        if url.isFileURL {
+            // 已下载的本地文件，不需要任何请求头。
+            item = AVPlayerItem(url: url)
+        } else if isQQAudioHost(url.host) {
             playbackHeaders = [
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
                 "Referer": "https://y.qq.com/",
@@ -1481,6 +1496,7 @@ final class PlayerManager: NSObject, ObservableObject {
                       self.currentSong?.identityKey == loadedSong.identityKey else { return }
                 if item.status == .readyToPlay { return }
                 guard item.status == .failed else { return }
+                if url.isFileURL, self.retryWithoutDownloadedFile(song: loadedSong) { return }
                 if self.retryBilibiliIfNeeded(failedURL: url) { return }
                 if isThirdParty && self.retryThirdPartyIfNeeded(excludingHost: url.host) { return }
                 if !isThirdParty && self.retryQQOfficialIfNeeded() { return }
@@ -1539,6 +1555,7 @@ final class PlayerManager: NSObject, ObservableObject {
                               self.currentSong?.identityKey == loadedSong.identityKey,
                               player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
                               !self.playbackConfirmed else { return }
+                        if url.isFileURL, self.retryWithoutDownloadedFile(song: loadedSong) { return }
                         if self.retryBilibiliIfNeeded(failedURL: url) { return }
                         if isThirdParty && self.retryThirdPartyIfNeeded(excludingHost: url.host) { return }
                         if !isThirdParty && self.retryQQOfficialIfNeeded() { return }
