@@ -297,6 +297,12 @@ struct SearchView: View {
     @State private var selectedPlaylist: Playlist?
     @ObservedObject private var historyStore = SearchHistoryStore.shared
     @State private var debounceTask: Task<Void, Never>?
+    /// 提交搜索、点热搜或历史时已经直接发起搜索；用这两个标记让 keyword / resultType 的
+    /// onChange 不再重复安排一次防抖搜索（否则 400ms 后那次会把前一次取消并重来）。
+    @State private var suppressKeywordChange = false
+    @State private var suppressResultTypeChange = false
+    /// 汽水搜索分页途中返回的部分结果，最终汇总为空时沿用。
+    @State private var qishuiPartialSongs: [Song] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var searchRequestID = UUID()
     @State private var playlistSearchTask: Task<Void, Never>?
@@ -347,6 +353,11 @@ struct SearchView: View {
             await loadHotWords()
         }
         .onChange(of: keyword) { newValue in
+            if suppressKeywordChange {
+                suppressKeywordChange = false
+                debounceTask?.cancel()
+                return
+            }
             debounceTask?.cancel()
             searchTask?.cancel()
             playlistSearchTask?.cancel()
@@ -392,6 +403,10 @@ struct SearchView: View {
             }
         }
         .onChange(of: resultType) { _ in
+            if suppressResultTypeChange {
+                suppressResultTypeChange = false
+                return
+            }
             let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
             BeansHaptics.tap()
@@ -583,6 +598,8 @@ struct SearchView: View {
     private func performSearch(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // 只有值真的会变化时才需要抑制 onChange（值不变时 onChange 不会触发，标记会残留）。
+        if keyword != trimmed { suppressKeywordChange = true }
         keyword = trimmed
         searchController.dismissKeyboard()
         debounceTask?.cancel()
@@ -898,6 +915,7 @@ struct SearchView: View {
                                     song: song,
                                     onTap: {
                                         BeansHaptics.tap()
+                                        searchController.dismissKeyboard()
                                         player.play(songs: songResults, startAt: index)
                                     },
                                     onPlayNext: {
@@ -1140,6 +1158,7 @@ struct SearchView: View {
                                 song: song,
                                 onTap: {
                                     BeansHaptics.tap()
+                                    searchController.dismissKeyboard()
                                     player.play(songs: songResults, startAt: index)
                                 },
                                 onPlayNext: {
@@ -1273,6 +1292,8 @@ struct SearchView: View {
     /// 点击歌手 / 专辑：以其名称搜索歌曲
     private func searchBy(_ name: String) {
         BeansHaptics.tap()
+        if keyword != name { suppressKeywordChange = true }
+        if resultType != .song { suppressResultTypeChange = true }
         keyword = name
         searchController.dismissKeyboard()
         debounceTask?.cancel()
@@ -1370,17 +1391,8 @@ struct SearchView: View {
             await MainActor.run {
                 searching = true
                 errorMessage = nil
-                switch selectedType {
-                case .all:
-                    songResults = []
-                    artistResults = []
-                    albumResults = []
-                    playlistResults = []
-                case .song: songResults = []
-                case .artist: artistResults = []
-                case .album: albumResults = []
-                case .playlist: playlistResults = []
-                }
+                // 搜索期间保留上一次的结果（界面顶部会显示小型加载指示），不再清空成整页转圈。
+                if selectedType == .song { qishuiPartialSongs = [] }
             }
             defer {
                 if !Task.isCancelled {
@@ -1444,27 +1456,35 @@ struct SearchView: View {
                         if !songs.isEmpty || !playlists.isEmpty { BeansHaptics.success() }
                     }
                 case .song:
-                    let songs: [Song]
+                    let outcome: (songs: [Song], failed: Bool)
                     if selectedProvider == .qishui {
-                        songs = await catalogSongs(
+                        outcome = await catalogSongsReportingFailures(
                             keyword: trimmed,
                             provider: selectedProvider,
                             limit: 100,
                             onPartialResults: { partial in
                                 guard searchRequestID == requestID else { return }
+                                qishuiPartialSongs = partial
                                 songResults = partial
                             }
                         )
                     } else {
-                        songs = await catalogSongs(keyword: trimmed, provider: selectedProvider, limit: 100)
+                        outcome = await catalogSongsReportingFailures(keyword: trimmed, provider: selectedProvider, limit: 100)
                     }
                     guard !Task.isCancelled, searchRequestID == requestID else { return }
-                    let completedSongs = await MainActor.run {
-                        songs.isEmpty && selectedProvider == .qishui ? songResults : songs
-                    }
+                    // 汽水分页中途展示过部分结果、但最终汇总为空时，沿用这部分结果。
+                    let partialSongs = await MainActor.run { qishuiPartialSongs }
+                    var songs = outcome.songs
+                    if songs.isEmpty, selectedProvider == .qishui { songs = partialSongs }
+                    let completedSongs = songs
+                    let allProvidersFailed = outcome.failed
                     await MainActor.run {
                         guard searchRequestID == requestID else { return }
                         songResults = completedSongs
+                        // 所有平台都请求失败才算“搜索失败”，和“没有结果”区分开。
+                        errorMessage = completedSongs.isEmpty && allProvidersFailed
+                            ? "搜索失败，请检查网络后重试"
+                            : nil
                         searchResultCache[cacheKey] = SearchResultCacheEntry(
                             songs: completedSongs,
                             artists: [],
@@ -1716,39 +1736,132 @@ struct SearchView: View {
         limit: Int,
         onPartialResults: (@MainActor ([Song]) -> Void)? = nil
     ) async -> [Song] {
+        await catalogSongsReportingFailures(
+            keyword: keyword,
+            provider: provider,
+            limit: limit,
+            onPartialResults: onPartialResults
+        ).songs
+    }
+
+    /// 与页面取数一致的搜索，并报告是否所有平台都请求失败：用来区分“没有结果”和“搜索失败”。
+    /// 聚合结果不再按平台返回先后排列，而是按标题 / 歌手匹配程度排序。
+    private func catalogSongsReportingFailures(
+        keyword: String,
+        provider: SearchCatalogProvider,
+        limit: Int,
+        onPartialResults: (@MainActor ([Song]) -> Void)? = nil
+    ) async -> (songs: [Song], failed: Bool) {
         switch provider {
         case .aggregate:
             let providers: [SearchCatalogProvider] = [.netease, .qq, .kugou, .kuwo, .migu, .qishui, .bilibili]
-            let completedResults = await withTaskGroup(of: [Song].self, returning: [[Song]].self) { group in
-                for candidate in providers {
+            let collected: [(index: Int, songs: [Song], failed: Bool)] = await withTaskGroup(
+                of: (index: Int, songs: [Song], failed: Bool).self,
+                returning: [(index: Int, songs: [Song], failed: Bool)].self
+            ) { group in
+                for (index, candidate) in providers.enumerated() {
                     group.addTask {
-                        await self.catalogSongs(keyword: keyword, provider: candidate, limit: limit)
+                        let outcome = await self.catalogSongsReportingFailures(
+                            keyword: keyword,
+                            provider: candidate,
+                            limit: limit
+                        )
+                        return (index: index, songs: outcome.songs, failed: outcome.failed)
                     }
                 }
-                var values: [[Song]] = []
+                var values: [(index: Int, songs: [Song], failed: Bool)] = []
                 for await value in group { values.append(value) }
                 return values
             }
-            return deduplicatedSongs(completedResults.flatMap { $0 })
+            // 先按固定的平台顺序放好，结果不再取决于哪个平台先返回。
+            let ordered = collected.sorted { $0.index < $1.index }
+            let ranked = rankedAggregateSongs(ordered.map(\.songs), keyword: keyword)
+            return (deduplicatedSongs(ranked), ordered.allSatisfy { $0.failed })
         case .kuwo:
-            return (try? await AdditionalCatalogSearchAPI.searchKuwo(keyword: keyword, limit: limit)) ?? []
+            let result = try? await AdditionalCatalogSearchAPI.searchKuwo(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         case .migu:
-            return (try? await AdditionalCatalogSearchAPI.searchMigu(keyword: keyword, limit: limit)) ?? []
+            let result = try? await AdditionalCatalogSearchAPI.searchMigu(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         case .qishui:
-            return (try? await QishuiAPI.shared.searchSongs(
+            let result = try? await QishuiAPI.shared.searchSongs(
                 keyword: keyword,
                 limit: limit,
                 onPartialResults: onPartialResults
-            )) ?? []
+            )
+            return (result ?? [], result == nil)
         case .bilibili:
-            return (try? await BilibiliAPI.shared.searchSongs(keyword: keyword, limit: limit)) ?? []
+            let result = try? await BilibiliAPI.shared.searchSongs(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         case .netease:
-            return (try? await NetEaseAPI.shared.search(keyword: keyword, limit: limit)) ?? []
+            let result = try? await NetEaseAPI.shared.search(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         case .qq:
-            return (try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: limit)) ?? []
+            let result = try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         case .kugou:
-            return (try? await KugouMusicAPI.shared.searchSongs(keyword: keyword, limit: limit)) ?? []
+            let result = try? await KugouMusicAPI.shared.searchSongs(keyword: keyword, limit: limit)
+            return (result ?? [], result == nil)
         }
+    }
+
+    /// 归一化后再匹配：小写、去音调、全半角统一，并去掉空白和标点。
+    private func normalizedSearchText(_ value: String) -> String {
+        value.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+    }
+
+    /// 歌曲与关键词的相关度：标题完全匹配 > 标题开头匹配 > 标题包含；歌手、专辑命中加分。
+    private func searchRelevanceScore(_ song: Song, query: String) -> Int {
+        guard !query.isEmpty else { return 0 }
+        let title = normalizedSearchText(song.name)
+        var score: Int
+        if title == query {
+            score = 100
+        } else if title.hasPrefix(query) {
+            score = 80
+        } else if title.contains(query) {
+            score = 60
+        } else {
+            score = 20
+        }
+        if normalizedSearchText(song.artists).contains(query) { score += 15 }
+        if normalizedSearchText(song.album).contains(query) { score += 5 }
+        return score
+    }
+
+    /// 各平台的结果先各自按相关度排好，再从最高分数档起、按平台顺序轮流出歌，
+    /// 避免聚合结果变成“先一整段网易云，再一整段 QQ”。
+    private func rankedAggregateSongs(_ perProvider: [[Song]], keyword: String) -> [Song] {
+        let query = normalizedSearchText(keyword)
+        let ranked: [[(score: Int, song: Song)]] = perProvider.map { songs in
+            songs.enumerated()
+                .map { (order: $0.offset, song: $0.element, score: searchRelevanceScore($0.element, query: query)) }
+                .sorted { lhs, rhs in
+                    if lhs.score != rhs.score { return lhs.score > rhs.score }
+                    return lhs.order < rhs.order
+                }
+                .map { (score: $0.score, song: $0.song) }
+        }
+        let total = ranked.reduce(0) { $0 + $1.count }
+        var result: [Song] = []
+        result.reserveCapacity(total)
+        var cursors = Array(repeating: 0, count: ranked.count)
+        while result.count < total {
+            var topScore = Int.min
+            for (index, list) in ranked.enumerated() {
+                guard cursors[index] < list.count else { continue }
+                topScore = max(topScore, list[cursors[index]].score)
+            }
+            if topScore == Int.min { break }
+            for (index, list) in ranked.enumerated() {
+                guard cursors[index] < list.count, list[cursors[index]].score == topScore else { continue }
+                result.append(list[cursors[index]].song)
+                cursors[index] += 1
+            }
+        }
+        return result
     }
 
     private func catalogArtists(keyword: String, provider: SearchCatalogProvider, limit: Int) async -> [Artist] {

@@ -4,6 +4,8 @@ final class AuthStore: ObservableObject {
     @Published var user: NetEaseUser?
     @Published var isLoggedIn = false
     @Published var playlists: [Playlist] = []
+    /// 最近一次拉取歌单失败（通常是登录过期），音乐库据此显示重新登录入口。
+    @Published var libraryLoadFailed = false
 
     private let defaults = UserDefaults.standard
     private let userKey = "beans.user"
@@ -15,8 +17,7 @@ final class AuthStore: ObservableObject {
             isLoggedIn = true
             playlists = SyncedPlaylistCache.shared
                 .cachedPlaylists(source: .netease, accountID: "\(saved.uid)")?
-                .playlists
-                .filter { $0.name != "我喜欢的音乐" } ?? []
+                .playlists ?? []
         }
     }
 
@@ -35,7 +36,8 @@ final class AuthStore: ObservableObject {
         guard let account else { throw NetEaseError.unknown("获取账号信息失败") }
         let playlists = (try? await NetEaseAPI.shared.userPlaylists(uid: account.uid)) ?? []
         user = account
-        self.playlists = playlists.filter { $0.name != "我喜欢的音乐" }
+        self.playlists = playlists
+        libraryLoadFailed = false
         if !self.playlists.isEmpty {
             SyncedPlaylistCache.shared.savePlaylists(
                 self.playlists,
@@ -71,17 +73,18 @@ final class AuthStore: ObservableObject {
         guard let user else { return }
         let accountID = "\(user.uid)"
         if let cached = SyncedPlaylistCache.shared.cachedPlaylists(source: .netease, accountID: accountID) {
-            playlists = cached.playlists.filter { $0.name != "我喜欢的音乐" }
+            playlists = cached.playlists
             if !force, SyncedPlaylistCache.shared.isFresh(cached), !BeansNetworkStatus.shared.isReachable {
                 return
             }
         }
-        if let cached = try? await NetEaseAPI.shared.userPlaylists(uid: user.uid) {
-            let filtered = cached.filter { $0.name != "我喜欢的音乐" }
-            if !filtered.isEmpty {
-                playlists = filtered
-                SyncedPlaylistCache.shared.savePlaylists(filtered, source: .netease, accountID: accountID)
-            }
+        if let fresh = try? await NetEaseAPI.shared.userPlaylists(uid: user.uid), !fresh.isEmpty {
+            libraryLoadFailed = false
+            playlists = fresh
+            SyncedPlaylistCache.shared.savePlaylists(fresh, source: .netease, accountID: accountID)
+        } else {
+            // 每个网易云账号至少有“我喜欢的音乐”，所以拉取失败或为空、且网络可用时，视为登录失效。
+            libraryLoadFailed = BeansNetworkStatus.shared.isReachable
         }
     }
 
@@ -89,6 +92,7 @@ final class AuthStore: ObservableObject {
         NetEaseAPI.shared.clearCookies()
         user = nil
         playlists = []
+        libraryLoadFailed = false
         isLoggedIn = false
         defaults.removeObject(forKey: userKey)
         DiscoverCache.shared.invalidate(.netease)

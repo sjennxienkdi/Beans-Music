@@ -25,7 +25,7 @@ struct BeansApp: App {
         // 闪退检测：优先初始化，检测上次异常退出并安装崩溃捕获
         _ = CrashReporter.shared
         CrashMetricCollector.shared.start()
-        BeansDiagnostics.shared.start()
+        // 个人分支不再连接作者服务器，诊断采样默认不启动，减少后台开销。
         // 主页暂停只应在设置页打开期间生效，避免异常退出后把暂停状态永久写入本地。，
         UserDefaults.standard.set(false, forKey: "beans.pauseHomeRendering")
         // 应用始终按设备能力请求最高刷新率，不再读取可导致重入的旧开关。
@@ -37,13 +37,19 @@ struct BeansApp: App {
             "beans.homeHideUsername": true,
             "beans.homeHeaderHideSort": true,
             "beans.homeHeaderHideRefresh": true,
-            PlatformPreferenceStore.hidePickerKey: true,
+            // 平台切换器默认显示：首页和音乐库不再只能靠长按标题切换平台。
+            PlatformPreferenceStore.hidePickerKey: false,
             "beans.homeWallpaperBlur": 0.0,
             "beans.haptics.enabled": true,
             "beans.playback.autoResumeLast": false,
             "beans.playback.autoSkipOnFailure": true,
             "beans.nowPlaying.enabled.v1": true
         ])
+
+        // 下载不再依赖作者服务器解锁，同时清掉服务器曾下发的拉黑状态。
+        UserDefaults.standard.set(true, forKey: BeansBackendSettings.downloadUnlockKey)
+        UserDefaults.standard.set(true, forKey: BeansBackendSettings.downloadGlobalUnlockKey)
+        UserDefaults.standard.set(false, forKey: BeansBackendSettings.blockedKey)
 
         // Restore wallpaper files before the first SwiftUI frame is created.
         // Doing this in the launch task made the root view render once with a
@@ -91,16 +97,10 @@ struct BeansApp: App {
                 player.restorePersistedPlayMode()
                 player.resumePersistedPlaybackIfEnabled()
                 FontManager.reinstallIfNeeded()
-                await DeviceReporter.shared.reportLaunch()
-                await RemoteControlStore.shared.refreshIfNeeded(force: true)
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
                 HighRefreshKeeper.shared.startIfNeeded()
-                Task {
-                    await DeviceReporter.shared.reportHeartbeat()
-                    await RemoteControlStore.shared.refreshIfNeeded()
-                }
             }
         }
     }

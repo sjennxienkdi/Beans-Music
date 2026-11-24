@@ -101,6 +101,7 @@ struct LibraryView: View {
     @State private var bilibiliLoading = false
     @State private var bilibiliSavedAt = Date.distantPast
     @State private var showBilibiliLogin = false
+    @State private var showNeteaseLogin = false
     @AppStorage("beans.uiStyle") private var uiStyleRaw = BeansUIStyle.liquid.rawValue
     private var libraryProviders: [LibraryProvider] { platformPrefs.enabledLibraryProviders }
 
@@ -319,6 +320,11 @@ struct LibraryView: View {
         .sheet(isPresented: $showBilibiliLogin) {
             BilibiliLoginSheet().environmentObject(theme)
         }
+        .sheet(isPresented: $showNeteaseLogin) {
+            LoginView()
+                .environmentObject(auth)
+                .environmentObject(theme)
+        }
         .confirmationDialog("音乐库平台", isPresented: $showLibraryPlatformMenu, titleVisibility: .visible) {
             ForEach(libraryProviders) { candidate in
                 Button {
@@ -359,8 +365,13 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
-                    libraryTitleButton
-                    Text(librarySubtitle)
+                        HStack(spacing: 10) {
+                            libraryTitleButton
+                            if !hidePlatformPicker, libraryProviders.count > 1 {
+                                libraryPlatformMenu
+                            }
+                        }
+                        Text(librarySubtitle)
                         .font(BeansFont.appFont(13))
                         .foregroundStyle(Color.beansComment)
                 }
@@ -389,6 +400,9 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .center) {
                 libraryTitleButton
+                if !hidePlatformPicker, libraryProviders.count > 1 {
+                    libraryPlatformMenu
+                }
                 Spacer(minLength: 12)
                 BeansProfileShortcutButton {
                     showProfile = true
@@ -491,10 +505,22 @@ struct LibraryView: View {
                 }
             }
             if !auth.isLoggedIn {
-                EmptyStateView(icon: "music.note.list", text: "登录网易云音乐后即可查看你的歌单")
+                neteaseLoginPrompt(
+                    text: "登录网易云音乐后即可查看你的歌单",
+                    buttonTitle: "登录网易云音乐"
+                )
+            } else if auth.playlists.isEmpty, auth.libraryLoadFailed {
+                neteaseLoginPrompt(
+                    text: "登录状态可能已过期，请重新登录网易云音乐",
+                    buttonTitle: "重新登录",
+                    icon: "exclamationmark.triangle"
+                )
             } else if auth.playlists.isEmpty {
                 createPlaylistCard
             } else {
+                if auth.libraryLoadFailed {
+                    neteaseReloginBanner
+                }
                 VStack(spacing: 0) {
                     ForEach(orderedNeteasePlaylists) { playlist in
                         Button {
@@ -522,11 +548,14 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button {
-                                BeansHaptics.tap()
-                                requestDelete(playlist)
-                            } label: {
-                                Label("删除歌单", systemImage: "trash")
+                            // 账号自带的固定歌单（网易云“我喜欢的音乐”）不提供删除。
+                            if !playlist.isNetEaseLikedPlaylist {
+                                Button {
+                                    BeansHaptics.tap()
+                                    requestDelete(playlist)
+                                } label: {
+                                    Label("删除歌单", systemImage: "trash")
+                                }
                             }
                         }
                         Divider().overlay(Color.beansComment.opacity(0.12))
@@ -566,6 +595,36 @@ struct LibraryView: View {
                 .beansCardShadow(radius: 9, y: 3)
             }
         }
+    }
+
+    /// 未登录或登录失效时的登录入口：直接在本页弹出登录页，不用再去“我的”里找。
+    private func neteaseLoginPrompt(
+        text: String,
+        buttonTitle: String,
+        icon: String = "music.note.list"
+    ) -> some View {
+        VStack(spacing: 12) {
+            EmptyStateView(icon: icon, text: text)
+            GlassButton(title: buttonTitle, systemName: "person.crop.circle", prominent: true) {
+                BeansHaptics.tap()
+                showNeteaseLogin = true
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var neteaseReloginBanner: some View {
+        Button {
+            BeansHaptics.tap()
+            showNeteaseLogin = true
+        } label: {
+            Label("登录状态可能已过期，点击重新登录", systemImage: "exclamationmark.triangle")
+                .font(BeansFont.appFont(12, .medium))
+                .foregroundStyle(Color.beansAmber)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
     }
 
     private var createPlaylistCard: some View {
@@ -776,11 +835,14 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button {
-                                BeansHaptics.tap()
-                                requestDelete(playlist)
-                            } label: {
-                                Label("删除歌单", systemImage: "trash")
+                            // 账号自带的固定歌单（网易云“我喜欢的音乐”）不提供删除。
+                            if !playlist.isNetEaseLikedPlaylist {
+                                Button {
+                                    BeansHaptics.tap()
+                                    requestDelete(playlist)
+                                } label: {
+                                    Label("删除歌单", systemImage: "trash")
+                                }
                             }
                         }
                         Divider().overlay(Color.beansComment.opacity(0.12))

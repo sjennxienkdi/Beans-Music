@@ -37,12 +37,25 @@ struct BeansLogEntry: Identifiable, Equatable {
 final class BeansLogger: ObservableObject {
     static let shared = BeansLogger()
 
-    @Published private(set) var entries: [BeansLogEntry] = []
+    /// 日志内容变动时递增，供日志页面刷新。内容本身通过 `entries` 按需读取，
+    /// 不再每写一条就复制并广播整个数组。
+    @Published private(set) var revision = 0
 
     private let maxEntries = 5000
     private let maxLogFileBytes = 10 * 1024 * 1024
     private let lock = NSLock()
     private var recentEntries: [BeansLogEntry] = []
+    /// 文件写入统一放到后台串行队列，调用方（常在主线程）不再等待磁盘。
+    private let writeQueue = DispatchQueue(label: "Beans.Logger.Write", qos: .utility)
+    private var publishScheduled = false
+    private var lastPublishAt = Date.distantPast
+
+    /// 当前内存中的日志快照（时间正序）。
+    var entries: [BeansLogEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recentEntries
+    }
 
     private static let lineFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -72,15 +85,35 @@ final class BeansLogger: ObservableObject {
         let entry = BeansLogEntry(date: Date(), level: level, message: message)
         lock.lock()
         recentEntries.append(entry)
+        // 超出上限时一次丢掉一批，避免每写一条都整体搬移数组。
         if recentEntries.count > maxEntries {
-            recentEntries.removeFirst(recentEntries.count - maxEntries)
+            recentEntries.removeFirst(maxEntries / 10)
         }
-        let snapshot = recentEntries
         lock.unlock()
-        DispatchQueue.main.async { [weak self] in
-            self?.entries = snapshot
+        schedulePublish()
+        writeQueue.async { [weak self] in
+            self?.write(entry.line)
         }
-        write(entry.line)
+    }
+
+    /// 通知日志页面刷新；日志密集时最多每 0.4 秒发布一次。仅在主线程访问下面两个状态。
+    private func schedulePublish() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let elapsed = Date().timeIntervalSince(self.lastPublishAt)
+            if elapsed >= 0.4 {
+                self.lastPublishAt = Date()
+                self.revision &+= 1
+            } else if !self.publishScheduled {
+                self.publishScheduled = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + (0.4 - elapsed)) { [weak self] in
+                    guard let self else { return }
+                    self.publishScheduled = false
+                    self.lastPublishAt = Date()
+                    self.revision &+= 1
+                }
+            }
+        }
     }
 
     /// 全部日志文本（按时间正序）
@@ -96,10 +129,12 @@ final class BeansLogger: ObservableObject {
         lock.lock()
         recentEntries = []
         lock.unlock()
-        DispatchQueue.main.async { [weak self] in
-            self?.entries = []
-        }
+        // 等排队中的写入完成后再删文件，避免删完又被补写回来。
+        writeQueue.sync {}
         try? FileManager.default.removeItem(at: logDirectory)
+        DispatchQueue.main.async { [weak self] in
+            self?.revision &+= 1
+        }
         log("日志已清空", level: .info)
     }
 
@@ -118,6 +153,8 @@ final class BeansLogger: ObservableObject {
 
     /// 导出日志文件（不存在则先生成一份完整日志）
     func exportLogURL() -> URL {
+        // 先等后台排队中的写入落盘，导出的文件才是完整的。
+        writeQueue.sync {}
         let url = currentFileURL
         if !FileManager.default.fileExists(atPath: url.path) {
             try? fullText.write(to: url, atomically: true, encoding: .utf8)

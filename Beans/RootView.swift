@@ -449,7 +449,6 @@ struct RootView: View {
                 updateInfo = info
                 showUpdateAlert = true
             }
-            await RemoteControlStore.shared.refreshIfNeeded(force: true)
             presentRemoteAnnouncementIfNeeded()
         }
         .overlay {

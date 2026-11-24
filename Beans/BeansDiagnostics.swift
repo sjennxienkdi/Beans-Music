@@ -28,7 +28,7 @@ final class BeansDiagnostics: ObservableObject {
     private let maxBreadcrumbs = 80
 
     private init() {
-        enabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true
+        enabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? false
         lastCrashFile = Self.latestCrashFile()
     }
 
@@ -104,7 +104,8 @@ final class BeansDiagnostics: ObservableObject {
     }
 
     func record(_ message: String, level: BeansLogLevel = .debug, file: String = #fileID, line: Int = #line, function: String = #function) {
-        guard enabled || level == .error || level == .fatal else { return }
+        // 未启动诊断或用户未开启时只保留错误级别，避免在滚动和网络请求路径上做磁盘统计与写盘。
+        guard (enabled && started) || level == .error || level == .fatal else { return }
         let context = diagnosticContext(reason: message, includeMetrics: false)
         let lineText = "\(context) file=\(URL(fileURLWithPath: file).lastPathComponent):\(line) function=\(function) content=\(redact(message))"
         lock.lock()

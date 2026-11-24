@@ -36,7 +36,7 @@ struct DiscoverView: View {
     /// 主页板块顺序（每日推荐 / 排行榜，可自定义）
     @State private var homeOrder = SectionOrderStore.load(SectionOrderStore.homeKey, defaults: SectionOrderStore.homeDefaults)
 
-    /// 主页只保留每日推荐和排行榜；歌单广场位于独立底栏页面。
+    /// 主页板块：每日推荐 / 推荐歌单 / 排行榜 / 新碟 / 歌手；完整的歌单广场位于独立底栏页面。
     private var availableSections: [String] { SectionOrderStore.homeDefaults }
     /// 首页数据源：记住上次选择，下次打开仍保持该平台（默认哔哩哔哩）
     @AppStorage("beans.homeSource") private var homeSourceRaw = SearchProvider.bilibili.rawValue
@@ -199,6 +199,11 @@ struct DiscoverView: View {
                                     if source == .netease || !dailySongs.isEmpty {
                                         dailySection
                                             .sectionEntrance(delay: 0)
+                                    }
+                                case "推荐歌单":
+                                    if !personalized.isEmpty {
+                                        personalizedSection
+                                            .sectionEntrance(delay: 0.02)
                                     }
                                 case "新碟上架":
                                     if source != .qq, !newAlbums.isEmpty {
@@ -650,6 +655,8 @@ struct DiscoverView: View {
                 switch key {
                 case "每日推荐":
                     loadingRecommendationSection
+                case "推荐歌单":
+                    loadingHorizontalCoverSection(titleWidth: 116, itemSize: isNativeClean ? 148 : 124, itemCount: 4)
                 case "新碟上架":
                     loadingHorizontalCoverSection(titleWidth: 116, itemSize: isNativeClean ? 148 : 124, itemCount: 4)
                 case "歌手":
