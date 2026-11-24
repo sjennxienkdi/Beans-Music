@@ -9,8 +9,10 @@ struct LocalPlaylist: Identifiable, Codable, Hashable {
     /// Optional metadata for playlists imported from another music app.
     var coverURL: URL?
     var sourceName: String?
+    /// 由平台歌单保存而来时的来源标识（如 "netease:12345"），再次保存同一歌单时据此合并。
+    var originKey: String?
 
-    enum CodingKeys: String, CodingKey { case id, name, songs, createdAt, coverURL, sourceName }
+    enum CodingKeys: String, CodingKey { case id, name, songs, createdAt, coverURL, sourceName, originKey }
 
     init(
         id: UUID = UUID(),
@@ -18,7 +20,8 @@ struct LocalPlaylist: Identifiable, Codable, Hashable {
         songs: [Song] = [],
         createdAt: Date = Date(),
         coverURL: URL? = nil,
-        sourceName: String? = nil
+        sourceName: String? = nil,
+        originKey: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -26,6 +29,7 @@ struct LocalPlaylist: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.coverURL = coverURL
         self.sourceName = sourceName
+        self.originKey = originKey
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +40,7 @@ struct LocalPlaylist: Identifiable, Codable, Hashable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
         coverURL = try c.decodeIfPresent(URL.self, forKey: .coverURL)
         sourceName = try c.decodeIfPresent(String.self, forKey: .sourceName)
+        originKey = try c.decodeIfPresent(String.self, forKey: .originKey)
     }
 }
 
@@ -131,14 +136,49 @@ final class LocalLibraryStore: ObservableObject {
         playlists[idx].songs.insert(song, at: 0)
     }
 
+    /// 批量添加歌曲到本地歌单（按 identityKey 去重），返回实际新增的数量。
+    /// 只写回一次：逐首调用 addSong 会让每一首都把全部歌单重新编码并落盘。
     @discardableResult
     func addSongs(_ songs: [Song], to id: UUID) -> Int {
-        let before = playlists.first(where: { $0.id == id })?.songs.count ?? 0
-        for song in songs {
-            addSong(song, to: id)
+        guard let idx = playlists.firstIndex(where: { $0.id == id }) else { return 0 }
+        var identities = Set(playlists[idx].songs.map(\.identityKey))
+        var inserted: [Song] = []
+        for song in songs where identities.insert(song.identityKey).inserted {
+            inserted.append(song)
         }
-        let after = playlists.first(where: { $0.id == id })?.songs.count ?? before
-        return after - before
+        guard !inserted.isEmpty else { return 0 }
+        var updated = playlists
+        // 新收藏排在歌单最上方，并保持传入顺序（最近加入的在最前）。
+        updated[idx].songs.insert(contentsOf: inserted.reversed(), at: 0)
+        playlists = updated
+        return inserted.count
+    }
+
+    /// 把一张平台歌单保存为本地歌单。同一来源的同一歌单再次保存时合并新增歌曲，
+    /// 不会重复建歌单。返回 (歌单名称, 新增数量, 是否合并到已有歌单)。
+    func savePlatformPlaylist(
+        name: String,
+        songs: [Song],
+        coverURL: URL?,
+        sourceName: String?,
+        originKey: String
+    ) -> (name: String, added: Int, merged: Bool) {
+        if let index = playlists.firstIndex(where: { $0.originKey == originKey }) {
+            let existing = playlists[index]
+            let added = addSongs(songs, to: existing.id)
+            return (existing.name, added, true)
+        }
+        var seen = Set<String>()
+        let uniqueSongs = songs.filter { seen.insert($0.identityKey).inserted }
+        let playlist = LocalPlaylist(
+            name: name,
+            songs: uniqueSongs,
+            coverURL: coverURL,
+            sourceName: sourceName,
+            originKey: originKey
+        )
+        playlists.insert(playlist, at: 0)
+        return (name, uniqueSongs.count, false)
     }
 
     func containsSong(_ song: Song?) -> Bool {

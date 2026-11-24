@@ -82,6 +82,10 @@ final class AuthStore: ObservableObject {
             libraryLoadFailed = false
             playlists = fresh
             SyncedPlaylistCache.shared.savePlaylists(fresh, source: .netease, accountID: accountID)
+            // 把网易云“我喜欢的音乐”并进本地“我喜欢”，在官方 App 里点过的红心也会出现。
+            if let likedPlaylist = fresh.first(where: { $0.isNetEaseLikedPlaylist }) {
+                await FavoritesStore.shared.syncNeteaseFromCloud(playlistID: likedPlaylist.id)
+            }
         } else {
             // 每个网易云账号至少有“我喜欢的音乐”，所以拉取失败或为空、且网络可用时，视为登录失效。
             libraryLoadFailed = BeansNetworkStatus.shared.isReachable

@@ -548,6 +548,11 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button {
+                                PlaylistSaver.fetchAndSave(playlist)
+                            } label: {
+                                Label("保存到本地歌单", systemImage: "folder.badge.plus")
+                            }
                             // 账号自带的固定歌单（网易云“我喜欢的音乐”）不提供删除。
                             if !playlist.isNetEaseLikedPlaylist {
                                 Button {
@@ -835,6 +840,11 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button {
+                                PlaylistSaver.fetchAndSave(playlist)
+                            } label: {
+                                Label("保存到本地歌单", systemImage: "folder.badge.plus")
+                            }
                             // 账号自带的固定歌单（网易云“我喜欢的音乐”）不提供删除。
                             if !playlist.isNetEaseLikedPlaylist {
                                 Button {

@@ -192,12 +192,21 @@ struct PlaylistView: View {
                     }
                 }
             }
-            if tracks.count > 1 {
-                HStack {
+            if !tracks.isEmpty {
+                HStack(spacing: 8) {
                     Text(beansSongCountText(displayedTracks.count))
                         .font(BeansFont.appFont(12))
                         .foregroundStyle(Color.beansComment)
                     Spacer()
+                    Button {
+                        BeansHaptics.tap()
+                        PlaylistSaver.save(playlist, songs: tracks)
+                    } label: {
+                        Label("保存到本地歌单", systemImage: "folder.badge.plus")
+                            .font(BeansFont.appFont(12, .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.beansAmber)
                     if downloadFeatureUnlocked {
                         Button {
                             BeansHaptics.tap()

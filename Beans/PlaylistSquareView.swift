@@ -272,6 +272,7 @@ struct PlaylistSquareView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .buttonStyle(GlassPressButtonStyle(scale: 0.97))
+                .beansPlaylistSaveMenu(playlist)
             }
         }
     }
@@ -410,6 +411,7 @@ struct PlaylistSquareView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                         .buttonStyle(GlassPressButtonStyle(scale: 0.97))
+                        .beansPlaylistSaveMenu(playlist)
                     }
                 }
             }

@@ -1552,6 +1552,7 @@ struct DiscoverView: View {
                                 .frame(width: 166, alignment: .leading)
                             }
                             .buttonStyle(GlassPressButtonStyle(scale: 0.96))
+                            .beansPlaylistSaveMenu(playlist)
                         }
                         Color.clear.frame(width: isNativeClean ? 0 : 8, height: 1)
                     }
@@ -1586,6 +1587,7 @@ struct DiscoverView: View {
                             }
                         }
                         .buttonStyle(GlassPressButtonStyle(scale: 0.96))
+                        .beansPlaylistSaveMenu(playlist)
                     }
                 }
             }

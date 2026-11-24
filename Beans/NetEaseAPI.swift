@@ -114,6 +114,11 @@ final class NetEaseAPI {
         UserDefaults.standard.removeObject(forKey: cookiesKey)
     }
 
+    /// 是否带有网易云登录态（MUSIC_U Cookie）。收藏同步前用它判断要不要发请求。
+    var isLoggedIn: Bool {
+        !musicU.isEmpty
+    }
+
     /// 应用内网页登录：将 WKWebView 中 music.163.com 的 Cookie 合并进登录态并持久化
     func importWebCookies(_ cookies: [String: String]) {
         var changed = false

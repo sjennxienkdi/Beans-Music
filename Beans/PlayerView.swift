@@ -293,21 +293,22 @@ struct PlayerView: View {
             // playlist without forcing the user through the cancel flow.
             showOfficialFavoriteActionPicker = true
         } else {
-            if localLibrary.containsSong(song) {
-                removeLocalFavorite(song)
-            } else {
-                saveFavoriteLocally(song)
-            }
+            // 红心 = 我喜欢：只切换喜欢状态，不再往本地歌单里增删歌曲。
+            let willLike = !favorites.isLiked(song)
+            favorites.setLiked(song, willLike)
+            BeansHaptics.success()
+            ToastCenter.shared.show(willLike ? "已加入我喜欢" : "已取消喜欢")
+            favoriteCandidate = nil
         }
     }
 
-    private func usesOfficialFavoriteDestination(for song: Song) -> Bool {
+    private func usesOfficialFavoriteDestination(for: Song) -> Bool {
         favoriteDestination == .official && song.source != .qq
     }
 
     private func favoriteMark(for song: Song?) -> FavoriteMark {
         guard let song else { return .none }
-        let local = localLibrary.containsSong(song)
+        let local = favorites.isLiked(song)
         let official = favorites.isOfficiallyLiked(song)
         switch (local, official) {
         case (true, true): return .both
@@ -315,13 +316,6 @@ struct PlayerView: View {
         case (false, true): return .official
         case (false, false): return .none
         }
-    }
-
-    private func removeLocalFavorite(_ song: Song) {
-        let removed = localLibrary.removeSongFromAllPlaylists(song)
-        ToastCenter.shared.show(removed > 0 ? "已取消本地收藏" : "歌曲不在本地歌单中")
-        BeansHaptics.success()
-        favoriteCandidate = nil
     }
 
     private func beginOfficialFavorite(_ song: Song) {
@@ -367,15 +361,6 @@ struct PlayerView: View {
             return []
         case .kuwo, .migu, .qishui, .bilibili, .webdav:
             return []
-        }
-    }
-
-    private func saveFavoriteLocally(_ song: Song) {
-        if localLibrary.playlists.count > 1 {
-            showAddToLocalPlaylist = true
-        } else {
-            ToastCenter.shared.show(localLibrary.addToDefaultFavorites(song))
-            BeansHaptics.success()
         }
     }
 
@@ -765,7 +750,7 @@ struct PlayerView: View {
                     lyrics: lyrics,
                     isPresented: $isPresented,
                     layoutData: vinylLayoutData,
-                    isFavorite: song.map { localLibrary.containsSong($0) } ?? false,
+                    isFavorite: favorites.isLiked(song),
                     favoriteMark: favoriteMark(for: song),
                     onFavorite: {
                         guard let song else { return }
@@ -1881,7 +1866,7 @@ struct PlayerView: View {
                     FavoriteHeartView(mark: favoriteMark(for: song), size: 15, inactiveColor: playerButtonText)
                         .frame(width: 38, height: 38)
                         .background {
-                            playerButtonSurface(size: 38, active: localLibrary.containsSong(song))
+                            playerButtonSurface(size: 38, active: favorites.isLiked(song))
                         }
                         .clipShape(Circle())
                 }
@@ -4025,7 +4010,7 @@ struct PlayerView: View {
                                     isPresented: .constant(true),
                                     layoutData: vinylLayoutData,
                                     initialShowsLyrics: layoutRenderingShowLyrics,
-                                    isFavorite: song.map { localLibrary.containsSong($0) } ?? false,
+                                    isFavorite: favorites.isLiked(song),
                                     onFavorite: {},
                                     onComments: {},
                                     onSettings: {},
@@ -4591,7 +4576,7 @@ struct PlayerView: View {
                         isPresented: .constant(true),
                         layoutData: vinylLayoutData,
                         initialShowsLyrics: layoutRenderingShowLyrics,
-                        isFavorite: song.map { localLibrary.containsSong($0) } ?? false,
+                        isFavorite: favorites.isLiked(song),
                         onFavorite: {},
                         onComments: {},
                         onSettings: {},

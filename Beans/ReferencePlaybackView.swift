@@ -835,7 +835,7 @@ struct ReferencePlaybackView: View {
 
     private var favoriteMark: FavoriteMark {
         guard let song else { return .none }
-        let local = localLibrary.containsSong(song)
+        let local = favorites.isLiked(song)
         let official = favorites.isOfficiallyLiked(song)
         switch (local, official) {
         case (true, true): return .both

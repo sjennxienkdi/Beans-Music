@@ -101,6 +101,19 @@ struct SongCell: View {
                     .font(BeansFont.appFont(12, .regular, .monospaced))
                     .foregroundStyle(Color.beansComment)
             }
+            // 行尾的加号：一键打开“加入歌单”，不用长按。
+            Button {
+                BeansHaptics.tap()
+                showAddToPlaylist = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.beansComment.opacity(0.85))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("加入歌单")
         }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, leadingIndex == nil ? 0 : 16)
@@ -116,6 +129,15 @@ struct SongCell: View {
             .map { $0[song.identityKey] }
             .removeDuplicates()) { downloadProgress = $0 }
         .contextMenu {
+            // 红心状态在菜单弹出时读取，保证显示的是最新状态。
+            let liked = FavoritesStore.shared.isLiked(song)
+            Button {
+                FavoritesStore.shared.setLiked(song, !liked)
+                BeansHaptics.success()
+                ToastCenter.shared.show(liked ? "已取消喜欢" : "已加入我喜欢")
+            } label: {
+                Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.slash" : "heart")
+            }
             Button {
                 player.playNext(song)
             } label: {
