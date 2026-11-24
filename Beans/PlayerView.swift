@@ -302,7 +302,7 @@ struct PlayerView: View {
         }
     }
 
-    private func usesOfficialFavoriteDestination(for: Song) -> Bool {
+    private func usesOfficialFavoriteDestination(for song: Song) -> Bool {
         favoriteDestination == .official && song.source != .qq
     }
 
