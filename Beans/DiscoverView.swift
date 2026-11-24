@@ -2384,6 +2384,7 @@ struct DailySongsSheet: View {
     @State private var isRefreshing = false
     @State private var refreshError: String?
     @State private var showBatchDownload = false
+    @StateObject private var selection = SongSelectionState()
     @AppStorage(BeansBackendSettings.downloadUnlockKey) private var downloadFeatureUnlocked = false
 
     init(songs: [Song], source: SearchProvider, onRefreshed: (([Song]) -> Void)? = nil) {
@@ -2412,17 +2413,24 @@ struct DailySongsSheet: View {
                             }
                             dailyHeader
                             ForEach(Array(filteredSongs.enumerated()), id: \.element.identityKey) { index, song in
-                                SongCell(
-                                    song: song,
-                                    showCover: true,
-                                    suppressNativeCleanRowGlass: true,
-                                    coverSize: 46,
-                                    fixedRowHeight: 64,
-                                    playbackContext: filteredSongs,
-                                    playbackIndex: index
-                                ) {
-                                    BeansHaptics.tap()
-                                    player.play(songs: filteredSongs, startAt: index)
+                                SelectableSongRow(selection: selection, song: song) {
+                                    SongCell(
+                                        song: song,
+                                        showCover: true,
+                                        suppressNativeCleanRowGlass: true,
+                                        coverSize: 46,
+                                        fixedRowHeight: 64,
+                                        playbackContext: filteredSongs,
+                                        playbackIndex: index
+                                    ) {
+                                        if selection.isActive {
+                                            BeansHaptics.select()
+                                            selection.toggle(song.identityKey)
+                                        } else {
+                                            BeansHaptics.tap()
+                                            player.play(songs: filteredSongs, startAt: index)
+                                        }
+                                    }
                                 }
                                 .padding(.horizontal, beansDetailContentInset)
                             }
@@ -2434,6 +2442,9 @@ struct DailySongsSheet: View {
                     .refreshable {
                         await refreshDailySongs()
                     }
+                    .beansSongSelectionBar(selection, songs: filteredSongs) { selected in
+                        player.playNextInOrder(selected)
+                    }
                 }
             }
             }
@@ -2441,6 +2452,11 @@ struct DailySongsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: beansLocalized("搜索每日推荐", "Search daily recommendations"))
             .beansDetailProfileToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    SongSelectionToggle(selection: selection)
+                }
+            }
             .task {
                 await refreshDailySongs()
             }

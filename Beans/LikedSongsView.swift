@@ -8,6 +8,7 @@ struct LikedSongsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchText = ""
+    @StateObject private var selection = SongSelectionState()
 
     private var songs: [Song] {
         favorites.likedSongs
@@ -35,16 +36,23 @@ struct LikedSongsView: View {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             header
                             ForEach(Array(displayedSongs.enumerated()), id: \.element.identityKey) { index, song in
-                                SongCell(
-                                    song: song,
-                                    showCover: true,
-                                    suppressNativeCleanRowGlass: true,
-                                    coverSize: 46,
-                                    fixedRowHeight: 64,
-                                    playbackContext: songs,
-                                    playbackIndex: playbackIndex(for: song)
-                                ) {
-                                    player.play(songs: songs, startAt: playbackIndex(for: song))
+                                SelectableSongRow(selection: selection, song: song) {
+                                    SongCell(
+                                        song: song,
+                                        showCover: true,
+                                        suppressNativeCleanRowGlass: true,
+                                        coverSize: 46,
+                                        fixedRowHeight: 64,
+                                        playbackContext: songs,
+                                        playbackIndex: playbackIndex(for: song)
+                                    ) {
+                                        if selection.isActive {
+                                            BeansHaptics.select()
+                                            selection.toggle(song.identityKey)
+                                        } else {
+                                            player.play(songs: songs, startAt: playbackIndex(for: song))
+                                        }
+                                    }
                                 }
                                 .padding(.horizontal, 22)
                             }
@@ -53,6 +61,9 @@ struct LikedSongsView: View {
                         .padding(.bottom, 118)
                     }
                     .beansScrollIndicatorsHidden()
+                    .beansSongSelectionBar(selection, songs: songs) { selected in
+                        player.playNextInOrder(selected)
+                    }
                 }
             }
             .navigationTitle("我喜欢的音乐")
@@ -61,6 +72,9 @@ struct LikedSongsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SongSelectionToggle(selection: selection)
                 }
             }
         }

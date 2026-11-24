@@ -22,6 +22,7 @@ struct PlaylistView: View {
     @State private var sortMode: PlaylistSortMode = .original
     @State private var showBatchDownload = false
     @State private var showPlaylistDescription = false
+    @StateObject private var selection = SongSelectionState()
     @AppStorage(BeansImmersiveDetailHeader.enabledKey) private var immersiveDetail = true
     @AppStorage("beans.homeHeaderHideSort") private var hideSortButton = false
     @AppStorage("beans.uiStyle") private var uiStyleRaw = BeansUIStyle.liquid.rawValue
@@ -97,16 +98,23 @@ struct PlaylistView: View {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             header
                             ForEach(Array(displayedTracks.enumerated()), id: \.element.identityKey) { index, song in
-                                SongCell(
-                                    song: song,
-                                    showCover: true,
-                                    suppressNativeCleanRowGlass: true,
-                                    coverSize: 46,
-                                    fixedRowHeight: 64,
-                                    playbackContext: orderedTracks,
-                                    playbackIndex: playbackIndex(for: song)
-                                ) {
-                                    player.play(songs: orderedTracks, startAt: playbackIndex(for: song))
+                                SelectableSongRow(selection: selection, song: song) {
+                                    SongCell(
+                                        song: song,
+                                        showCover: true,
+                                        suppressNativeCleanRowGlass: true,
+                                        coverSize: 46,
+                                        fixedRowHeight: 64,
+                                        playbackContext: orderedTracks,
+                                        playbackIndex: playbackIndex(for: song)
+                                    ) {
+                                        if selection.isActive {
+                                            BeansHaptics.select()
+                                            selection.toggle(song.identityKey)
+                                        } else {
+                                            player.play(songs: orderedTracks, startAt: playbackIndex(for: song))
+                                        }
+                                    }
                                 }
                                 .padding(.horizontal, 22)
                             }
@@ -115,12 +123,20 @@ struct PlaylistView: View {
                         .padding(.bottom, 118)
                     }
                     .beansScrollIndicatorsHidden()
+                    .beansSongSelectionBar(selection, songs: orderedTracks) { songs in
+                        player.playNextInOrder(songs)
+                    }
                 }
             }
             }
             .navigationTitle(playlist.name)
             .navigationBarTitleDisplayMode(.inline)
             .beansDetailProfileToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    SongSelectionToggle(selection: selection)
+                }
+            }
         .task { await load() }
         .sheet(isPresented: $showBatchDownload) {
             BatchDownloadSheet(songs: displayedTracks, title: "下载歌单")

@@ -303,6 +303,7 @@ struct SearchView: View {
     @State private var suppressResultTypeChange = false
     /// 汽水搜索分页途中返回的部分结果，最终汇总为空时沿用。
     @State private var qishuiPartialSongs: [Song] = []
+    @StateObject private var selection = SongSelectionState()
     @State private var searchTask: Task<Void, Never>?
     @State private var searchRequestID = UUID()
     @State private var playlistSearchTask: Task<Void, Never>?
@@ -353,6 +354,8 @@ struct SearchView: View {
             await loadHotWords()
         }
         .onChange(of: keyword) { newValue in
+            // 关键词变了，结果会换一批，之前的勾选不再有意义。
+            if selection.isActive { selection.end() }
             if suppressKeywordChange {
                 suppressKeywordChange = false
                 debounceTask?.cancel()
@@ -1150,27 +1153,42 @@ struct SearchView: View {
                                 .buttonStyle(.plain)
                                 .fixedSize(horizontal: true, vertical: false)
                             }
+                            SongSelectionToggle(selection: selection)
+                                .font(BeansFont.appFont(12, .semibold))
+                                .foregroundStyle(Color.beansAmber)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background { BeansSurface(shape: Capsule()) }
+                                .buttonStyle(.plain)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 8)
                         ForEach(Array(songResults.enumerated()), id: \.element.identityKey) { index, song in
-                            BeansSearchSongRow(
-                                song: song,
-                                onTap: {
-                                    BeansHaptics.tap()
-                                    searchController.dismissKeyboard()
-                                    player.play(songs: songResults, startAt: index)
-                                },
-                                onPlayNext: {
-                                    player.playNext(song)
-                                },
-                                onAddToPlaylist: {
-                                    showAddToPlaylist = song
-                                },
-                                onDownload: downloadFeatureUnlocked ? {
-                                    selectedDownloadSong = song
-                                } : nil
-                            )
+                            SelectableSongRow(selection: selection, song: song) {
+                                BeansSearchSongRow(
+                                    song: song,
+                                    onTap: {
+                                        if selection.isActive {
+                                            BeansHaptics.select()
+                                            selection.toggle(song.identityKey)
+                                            return
+                                        }
+                                        BeansHaptics.tap()
+                                        searchController.dismissKeyboard()
+                                        player.play(songs: songResults, startAt: index)
+                                    },
+                                    onPlayNext: {
+                                        player.playNext(song)
+                                    },
+                                    onAddToPlaylist: {
+                                        showAddToPlaylist = song
+                                    },
+                                    onDownload: downloadFeatureUnlocked ? {
+                                        selectedDownloadSong = song
+                                    } : nil
+                                )
+                            }
                         }
                     }
                     .padding(.horizontal, 20)
@@ -1183,6 +1201,9 @@ struct SearchView: View {
                         .tint(Color.beansAmber)
                         .padding(.top, 10)
                         .opacity(searching ? 1 : 0)
+                }
+                .beansSongSelectionBar(selection, songs: songResults) { selected in
+                    player.playNextInOrder(selected)
                 }
             }
         }
