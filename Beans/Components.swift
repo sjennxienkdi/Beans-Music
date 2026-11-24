@@ -1378,7 +1378,7 @@ private final class BeansCoverImageLoader: ObservableObject {
                     }
                     // 大图在主线程之外解码并缩到显示所需的大小。
                     let decoded = await BeansCoverImageStore.decodeCoverOffMain(data)
-                    guard !Task.isCancelled, let self, self.loadedURL == url else { return }
+                    guard !Task.isCancelled, self.loadedURL == url else { return }
                     guard let image = decoded else {
                         self.didFail = true
                         return
