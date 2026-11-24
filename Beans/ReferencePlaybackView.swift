@@ -17,7 +17,9 @@ private struct ReferencePlaybackPresentationMetrics {
 struct ReferencePlaybackView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var player: PlayerManager
-    @EnvironmentObject private var clock: PlaybackClock
+    /// 根视图不再直接观察高频时钟（原因见 PlaybackClockDriven）。这里只是取值的入口，
+    /// 真正的读取都发生在用 PlaybackClockDriven 包起来的歌词页和歌词预览里。
+    private var clock: PlaybackClock { player.clock }
     @EnvironmentObject private var favorites: FavoritesStore
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var localLibrary = LocalLibraryStore.shared
@@ -110,8 +112,10 @@ struct ReferencePlaybackView: View {
                             compactQueuePage
                                 .transition(.opacity)
                         } else if showLyrics {
-                            lyricsPage
-                                .transition(.asymmetric(
+                            PlaybackClockDriven {
+                                lyricsPage
+                            }
+                            .transition(.asymmetric(
                                     insertion: .move(edge: .bottom).combined(with: .opacity),
                                     removal: .move(edge: .top).combined(with: .opacity)
                                 ))
@@ -247,9 +251,12 @@ struct ReferencePlaybackView: View {
             .padding(.top, 22)
             .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.title)))
 
-            MiniLyricsPreview(lines: previewLyrics, primary: primaryColor, secondary: secondaryColor) {
-                BeansHaptics.tap()
-                showLyrics = true
+            PlaybackClockDriven {
+                // 歌词预览要跟着当前歌词行走，所以放在观察时钟的小视图里。
+                MiniLyricsPreview(lines: previewLyrics, primary: primaryColor, secondary: secondaryColor) {
+                    BeansHaptics.tap()
+                    showLyrics = true
+                }
             }
             .padding(.top, 18)
             .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.previewLyric)))

@@ -5,7 +5,9 @@ import UIKit
 struct PlayerView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var player: PlayerManager
-    @EnvironmentObject private var clock: PlaybackClock
+    /// 根视图不再直接观察高频时钟：需要跟着播放进度走的分支用 PlaybackClockDriven 包起来，
+    /// 整页（和它挂着的一百多项设置）就不必每秒被重算多次。这里只是取值的入口。
+    private var clock: PlaybackClock { player.clock }
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var favorites: FavoritesStore
     @ObservedObject private var localLibrary = LocalLibraryStore.shared
@@ -692,8 +694,10 @@ struct PlayerView: View {
                     openPlayerSettings()
                 })
             } else if isIPadLandscape(in: rootGeometry.size) && showLyrics && coverPlayerStyle != .record {
-                iPadLandscapeLyricsView
-                    .id("landscape-\(layoutRenderingStyle.rawValue)-\(rootGeometry.size.width > rootGeometry.size.height)")
+                PlaybackClockDriven {
+                    iPadLandscapeLyricsView
+                        .id("landscape-\(layoutRenderingStyle.rawValue)-\(rootGeometry.size.width > rootGeometry.size.height)")
+                }
             } else if coverPlayerStyle == .appleMusic {
                 ZStack {
                     ReferencePlaybackView(
@@ -777,6 +781,7 @@ struct PlayerView: View {
                     downloadFeatureUnlocked: downloadFeatureUnlocked
                 )
             } else if coverPlayerStyle == .vinyl {
+                PlaybackClockDriven {
                 GeometryReader { geo in
                     ZStack {
                         background
@@ -809,7 +814,9 @@ struct PlayerView: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(commentSwipeGesture, including: .all)
                 }
+                }
             } else {
+                PlaybackClockDriven {
                 GeometryReader { geo in
                     ZStack {
                         background
@@ -845,6 +852,7 @@ struct PlayerView: View {
                                 .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
                         }
                     }
+                }
                 }
             }
         }
@@ -5392,6 +5400,18 @@ struct PlayerView: View {
         }
     }
 
+}
+
+/// 只在这个小视图里观察高频播放时钟。
+/// 内容闭包在每次时钟更新时重新求值；外层页面不必跟着每秒重算多次。
+/// 进度条、歌词滚动等需要平滑刷新的部分继续各自观察 PlaybackClock。
+struct PlaybackClockDriven<Content: View>: View {
+    @EnvironmentObject private var clock: PlaybackClock
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+    }
 }
 
 /// 黑胶页专用的白色极简进度条：非拖动时隐藏滑块，拖动时才显示。

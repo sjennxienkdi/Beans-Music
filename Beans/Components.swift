@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import CryptoKit
 import ObjectiveC
 
@@ -1107,6 +1108,39 @@ final class BeansCoverImageStore {
         return URLSession(configuration: configuration)
     }()
 
+    /// 封面在 3x 屏上最大约 400pt，1200 像素足够；更大的原图解码后会一直占着内存。
+    private static let maxCoverPixels = 1200
+
+    /// 解码封面。原图任一边超过上限时缩到上限，否则保持原来的惰性解码（不增加开销）。
+    /// 只应在主线程之外调用：缩放是立即解码的。
+    static func decodeCover(_ data: Data) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return UIImage(data: data)
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]
+        let width = (properties?[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue ?? 0
+        let height = (properties?[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue ?? 0
+        guard max(width, height) > Double(maxCoverPixels) else { return UIImage(data: data) }
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxCoverPixels,
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+    }
+
+    /// 网络下载完成后的解码：放到主线程之外，避免在主线程解压大图。
+    static func decodeCoverOffMain(_ data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            decodeCover(data)
+        }.value
+    }
+
     /// Read decoded memory or disk-backed URLCache data synchronously.
     /// CoverImage uses this during its first body evaluation to avoid a
     /// skeleton flash when the cover was already cached.
@@ -1160,7 +1194,7 @@ final class BeansCoverImageStore {
         diskQueue.async {
             let image: UIImage?
             if let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
-               let cachedImage = UIImage(data: data) {
+               let cachedImage = decodeCover(data) {
                 memoryCache.setObject(cachedImage, forKey: url as NSURL)
                 try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
                 image = cachedImage
@@ -1168,7 +1202,7 @@ final class BeansCoverImageStore {
                 var request = URLRequest(url: url)
                 request.cachePolicy = .returnCacheDataElseLoad
                 if let response = session.configuration.urlCache?.cachedResponse(for: request),
-                   let cachedImage = UIImage(data: response.data) {
+                   let cachedImage = decodeCover(response.data) {
                     memoryCache.setObject(cachedImage, forKey: url as NSURL)
                     persist(data: response.data, for: url)
                     image = cachedImage
@@ -1338,8 +1372,14 @@ private final class BeansCoverImageLoader: ObservableObject {
                     let (data, response) = try await BeansCoverImageStore.session.data(for: request)
                     guard !Task.isCancelled, let self, self.loadedURL == url else { return }
                     guard let http = response as? HTTPURLResponse,
-                          200..<300 ~= http.statusCode,
-                          let image = UIImage(data: data) else {
+                          200..<300 ~= http.statusCode else {
+                        self.didFail = true
+                        return
+                    }
+                    // 大图在主线程之外解码并缩到显示所需的大小。
+                    let decoded = await BeansCoverImageStore.decodeCoverOffMain(data)
+                    guard !Task.isCancelled, let self, self.loadedURL == url else { return }
+                    guard let image = decoded else {
                         self.didFail = true
                         return
                     }
