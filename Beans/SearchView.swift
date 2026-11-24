@@ -485,22 +485,39 @@ struct SearchView: View {
                 GlassBackdrop(customColor: theme.backgroundSyncAll ? theme.customBackground : nil)
             }
             TabBarAppearanceConfigurator()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 10) {
-                        searchField
-                        BeansProfileShortcutButton {
-                            showProfile = true
-                        }
+            // 搜索框固定在顶部；有关键词时平台和类型筛选条也固定，只有结果区域滚动。
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    searchField
+                    BeansProfileShortcutButton {
+                        showProfile = true
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    contentArea
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                if keyword.isEmpty {
+                    ScrollView {
+                        hotSection
+                            .frame(maxWidth: .infinity, alignment: .top)
+                    }
+                    .beansScrollIndicatorsHidden()
+                    .beansScrollDismissesKeyboard()
+                } else {
+                    VStack(spacing: 0) {
+                        resultProviderPicker
+                        typeTabs
+                    }
+                    .padding(.bottom, 8)
+                    ScrollView {
+                        resultsArea
+                            .frame(maxWidth: .infinity, alignment: .top)
+                    }
+                    .beansScrollIndicatorsHidden()
+                    .beansScrollDismissesKeyboard()
+                }
             }
-            .beansScrollIndicatorsHidden()
-            .beansScrollDismissesKeyboard()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
